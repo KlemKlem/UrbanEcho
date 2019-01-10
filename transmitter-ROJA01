@@ -1,0 +1,168 @@
+//Teensy 3.2 96MHz
+//Klementyna Jankiewicz Urban Echo // Creative Coding @SWPS
+//Wieslaw Bartkowski dla ROJA 2018
+
+#include <Audio.h>
+#include <Wire.h>
+#include <SPI.h>
+#include <SerialFlash.h>
+
+#include <nRF24L01.h>
+#include <RF24.h>
+
+//--------------------
+#define Nkul 18 //no of recivers
+//--------------------
+
+#define Nkolejka 20
+
+RF24 radio(5, 6);
+const byte rxAddr1[6] = "00011";
+
+const int myInput = AUDIO_INPUT_MIC;
+
+AudioInputI2S          audioInput;         // audio shield: mic or line-in
+AudioAnalyzeFFT1024    myFFT;
+
+AudioConnection patchCord1(audioInput, 0, myFFT, 0);
+
+AudioControlSGTL5000 audioShield;
+
+int kolejka[Nkolejka];
+
+bool prevButtonState = true;
+
+byte message[4] = {1, 1, 0, 0}; // = "1:1:0";
+
+void setup() {
+  delay(500);
+  Serial.begin(9600);
+  delay(500);
+
+  for (int i = 0; i < Nkolejka; i++) {
+    kolejka[i] = 0;
+  }
+
+  AudioMemory(12);
+
+  audioShield.enable();
+  audioShield.inputSelect(myInput);
+  audioShield.volume(0.5);
+
+  //myFFT.windowFunction(AudioWindowHanning1024);
+  myFFT.windowFunction(NULL);
+
+  SPI.setMISO(8);
+  SPI.setMOSI(7);
+  SPI.setSCK(14);
+  radio.begin();
+  //  radio.setPayloadSize(sizeof(message));
+  radio.openWritingPipe(rxAddr1);
+
+  radio.stopListening();
+
+  pinMode(22, INPUT_PULLUP);
+  delay(20);
+  prevButtonState = digitalRead(22);
+}
+
+//bufor do wysylania danych do kul
+//format
+//nr_kuli:komenda:wartosc
+//spis komend
+//0 - zgas diode
+//1 - zapal diode
+//2 - zagraj ton : wartosc1 to ton w hz np. 1500 wartosc2 to czas w ms np. 500
+//3 - zagraj ton bez diody : wartosc1 to ton w hz np. 1500 wartosc2 to czas w ms np. 500
+//4 - ucisz kule
+//5 - uczisz kule i wylacz led
+//8 - uspij kule - kula nie reaguje na komendy poza obudz kule
+//9 - obudz kule
+
+union ArrayToInt16 {
+  byte      byteArray[2];
+  uint16_t  uint16;
+} AToI;
+
+byte nrKuli = 1;
+byte komenda;
+uint16_t wartosc = 1;
+uint16_t prevWartosc = 0;
+
+void loop() {
+  float n;
+  float m = 0;
+  int i;
+  int f = 0;
+
+  if (myFFT.available()) {
+    for (i = 0; i < 50; i++) {
+      n = myFFT.read(i);
+      if (n >= 0.2) {
+        if (n > m) {
+          m = n;
+          f = i;
+        }
+      }
+    }
+    dodajDoKolejki(f);
+  }
+
+  //f goes to all recivers
+  if (millis() > 2000) {
+    wartosc = kolejka[Nkolejka - nrKuli];
+    //wartosc = kolejka[Nkolejka-nrKuli*2];
+    //wartosc = kolejka[Nkolejka-nrKuli*5];
+
+    if (wartosc > 1) {
+      komenda = 2;
+      wartosc = wartosc -1;
+      wartosc = wartosc * 43;
+    }
+    else {
+      komenda = 5;
+      wartosc = 0;
+    }
+
+    message[0] = nrKuli;
+    message[1] = komenda;
+    AToI.uint16 = wartosc;
+    message[2] = AToI.byteArray[0];
+    message[3] = AToI.byteArray[1];
+
+    //   if (!digitalRead(22))
+
+    radio.write(&message, sizeof(message));
+
+    //pressing a button mutes all recivers (button NO)
+        if (!prevButtonState && digitalRead(22)) {
+          for (int i = 1; i <= 6; i++) {
+            message[0] = 100 + i;
+            message[1] = 5;
+            message[2] = 0;
+            message[3] = 0;
+            radio.write(&message, sizeof(message));
+            delay(50);
+          }
+        }
+
+    delay(5);
+    
+    prevButtonState = digitalRead(22);
+    nrKuli++;
+    if (nrKuli > Nkul) nrKuli = 1;
+  }
+
+}
+
+
+void dodajDoKolejki(int f) {
+  for (int i = 1; i < Nkolejka; i++) {
+    kolejka[i - 1] = kolejka[i];
+  }
+  kolejka[Nkolejka - 1] = f;
+
+}
+
+
+

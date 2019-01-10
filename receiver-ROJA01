@@ -1,0 +1,119 @@
+//Arduino pro 5V 16MHz
+//Klementyna Jankiewicz Urban Echo - Creative Coding @SWPS
+//Wieslaw Bartkowski dla ROJA 2018
+
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
+
+//docelowo w kulach
+RF24 radio(7, 8);
+
+// Each reciver gets unique myNR, 
+// starts with 1!!!
+//------------------------------------------
+const byte myNR = 15;
+//------------------------------------------
+
+const byte myGR = 1+(myNR-1)/3;
+const byte rxAddr1[6] = "00011";
+
+void setup()
+{
+//  while (!Serial);
+  Serial.begin(9600);
+
+  radio.begin();
+//  radio.setDataRate(RF24_250KBPS);
+  radio.openReadingPipe(0, rxAddr1);
+
+  radio.startListening();
+
+  pinMode(9, OUTPUT);
+}
+
+byte message[4] = {0, 0, 0, 0};
+
+union ArrayToInt16 {
+  byte      byteArray[2];
+  uint16_t  uint16;
+} AToI;
+
+//dane komendy
+byte nr;
+byte komenda;
+uint16_t wartosc;
+
+boolean spi = false;
+
+void loop()
+{
+  if (radio.available())
+  {
+    radio.read(&message, sizeof(message));
+
+    //dekoduj tekst komendy
+
+    nr = message[0];
+    if (nr == myNR || (nr>100 && ((nr-100) == myGR))) {
+
+      komenda = message[1];
+
+      AToI.byteArray[0] = message[2];
+      AToI.byteArray[1] = message[3];
+      wartosc = AToI.uint16;
+
+//      Serial.print("nr: ");
+//      Serial.println(nr);
+//      Serial.print("komenda: ");
+//      Serial.println(komenda);
+//      Serial.print("wartosc: ");
+//      Serial.println(wartosc);
+
+      if (9 == komenda) {
+        spi = false;
+      }
+      if (8 == komenda) {
+        spi = true;
+      }
+
+      if (!spi) {
+        if (0 == komenda) {
+          LEDoff();
+        }
+        if (1 == komenda) {
+          LEDon();
+        }
+        if (2 == komenda) {
+          tone(2, wartosc);
+          LEDon();
+        }
+        if (3 == komenda) {
+          tone(2, wartosc);
+        }
+        if (4 == komenda) {
+          noTone(2);
+        }
+        if (5 == komenda) {
+          noTone(2);
+          LEDoff();
+        }
+      }
+
+    }
+
+  }
+
+}
+
+
+void LEDon()
+{
+  digitalWrite(9, HIGH);
+}
+
+
+void LEDoff()
+{
+  digitalWrite(9, LOW);
+}
